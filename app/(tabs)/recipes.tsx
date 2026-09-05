@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { getMyHouseholdId } from '../../lib/household';
 import { supabase } from '../../lib/supabase';
 import { colors, radius } from '../../theme';
 
@@ -23,9 +24,18 @@ export default function RecipesScreen() {
   const generateRecipes = useCallback(async () => {
     setLoading(true);
 
+    const hhId = await getMyHouseholdId();
+
+    if (!hhId) {
+      setPantryEmpty(true);
+      setLoading(false);
+      return;
+    }
+
     const { data: pantryItems, error: pantryError } = await supabase
       .from('pantry_items')
       .select('name, category')
+      .eq('household_id', hhId)
       .order('created_at', { ascending: false })
       .limit(20);
 
@@ -69,7 +79,6 @@ haveCount = how many of MY ingredients it uses. missingItems = up to 2 extra thi
       });
 
       const json = await response.json();
-      console.log('GROQ RESPONSE:', JSON.stringify(json));
       const raw = json.choices?.[0]?.message?.content ?? '{"recipes":[]}';
       const parsed = JSON.parse(raw);
       setRecipes(parsed.recipes ?? []);

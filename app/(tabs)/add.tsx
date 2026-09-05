@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, Alert, Modal } from 'react-native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
-import { colors, radius, categoryDefaults } from '../../theme';
+import { BarcodeScanningResult, CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useMemo, useState } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { categoryDefaults, colors, radius } from '../../theme';
 
 const CATEGORIES = Object.keys(categoryDefaults);
 
@@ -75,14 +75,30 @@ export default function AddItemScreen() {
       return;
     }
 
-    setSaving(true);
+        setSaving(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSaving(false);
+      Alert.alert('Not logged in', 'Please log in again.');
+      return;
+    }
+
+    const { data: membership } = await supabase
+      .from('household_members')
+      .select('household_id, full_name')
+      .eq('user_id', user.id)
+      .single();
+
     const { error } = await supabase.from('pantry_items').insert({
       name: name.trim(),
       brand: brand.trim() || null,
       category,
       quantity: qty,
       expiry_date: expiryDateISO,
-      added_by: 'You',
+      added_by: membership?.full_name || 'You',
+      household_id: membership?.household_id,
+      user_id: user.id,
     });
     setSaving(false);
 

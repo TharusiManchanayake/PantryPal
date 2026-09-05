@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { getMyHouseholdId } from '../../lib/household';
 import { supabase } from '../../lib/supabase';
 import { colors, radius } from '../../theme';
 
@@ -18,12 +19,24 @@ export default function ShoppingListScreen() {
   const [loading, setLoading] = useState(true);
   const [newItem, setNewItem] = useState('');
   const [adding, setAdding] = useState(false);
+  const [householdId, setHouseholdId] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
+
+    const hhId = await getMyHouseholdId();
+    setHouseholdId(hhId);
+
+    if (!hhId) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('shopping_list')
       .select('*')
+      .eq('household_id', hhId)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -55,14 +68,23 @@ export default function ShoppingListScreen() {
   };
 
   const addItem = async () => {
-    if (!newItem.trim()) return;
+    if (!newItem.trim() || !householdId) return;
     setAdding(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: membership } = await supabase
+      .from('household_members')
+      .select('full_name')
+      .eq('user_id', user?.id)
+      .maybeSingle();
 
     const { error } = await supabase.from('shopping_list').insert({
       name: newItem.trim(),
       category: 'Other',
-      added_by: 'You',
+      added_by: membership?.full_name || 'You',
       checked: false,
+      household_id: householdId,
+      user_id: user?.id,
     });
 
     setAdding(false);
