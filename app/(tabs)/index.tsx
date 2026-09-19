@@ -1,10 +1,16 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { getMyHouseholdId, getMyHouseholdInfo, HouseholdInfo, joinHouseholdByInviteCode } from '../../lib/household';
 import { supabase } from '../../lib/supabase';
-import { colors, radius } from '../../theme';
+import { categoryDefaults, colors, radius } from '../../theme';
+
+const CATEGORIES = Object.keys(categoryDefaults);
+
+// Same estimate used on the Insights screen — keep these two in sync if this
+// ever changes to use real item prices instead of a flat guess.
+const ESTIMATED_VALUE_PER_ITEM = 2.5;
 
 type PantryItem = {
   id: string;
@@ -12,6 +18,7 @@ type PantryItem = {
   category: string;
   expiry_date: string | null;
   added_by: string | null;
+  quantity: number;
 };
 
 export default function DashboardScreen() {
@@ -27,6 +34,16 @@ export default function DashboardScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [myName, setMyName] = useState('');
+  const [savedThisMonth, setSavedThisMonth] = useState(0);
+  const [usedThisMonthCount, setUsedThisMonthCount] = useState(0);
+
+  // Edit modal state
+  const [editingItem, setEditingItem] = useState<PantryItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCategory, setEditCategory] = useState('Dairy');
+  const [editQty, setEditQty] = useState(1);
+  const [editExpiryISO, setEditExpiryISO] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -45,6 +62,8 @@ export default function DashboardScreen() {
       setExpiringSoon(0);
       setShoppingCount(0);
       setPantryItems([]);
+      setSavedThisMonth(0);
+      setUsedThisMonthCount(0);
       setLoading(false);
       return;
     }
@@ -70,15 +89,29 @@ export default function DashboardScreen() {
 
     const { data: items } = await supabase
       .from('pantry_items')
-      .select('id, name, category, expiry_date, added_by')
+      .select('id, name, category, expiry_date, added_by, quantity')
       .eq('household_id', hhId)
       .order('expiry_date', { ascending: true })
       .limit(10);
+
+    // Real savings: items marked "used" (not wasted) so far this calendar month
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const { count: usedCount } = await supabase
+      .from('waste_log')
+      .select('*', { count: 'exact', head: true })
+      .eq('household_id', hhId)
+      .eq('action', 'used')
+      .gte('created_at', startOfMonth.toISOString());
 
     setTotalItems(total ?? 0);
     setExpiringSoon(expiring ?? 0);
     setShoppingCount(shopping ?? 0);
     setPantryItems(items ?? []);
+    setUsedThisMonthCount(usedCount ?? 0);
+    setSavedThisMonth((usedCount ?? 0) * ESTIMATED_VALUE_PER_ITEM);
     setLoading(false);
   }, []);
 
@@ -152,6 +185,67 @@ export default function DashboardScreen() {
     setShowJoinBox(false);
     Alert.alert('Joined!', "You're now sharing a pantry with this household.");
     loadStats();
+  };
+
+  const openEdit = (item: PantryItem) => {
+    setEditingItem(item);
+    setEditName(item.name);
+    setEditCategory(item.category);
+    setEditQty(item.quantity || 1);
+    setEditExpiryISO(item.expiry_date || new Date().toISOString().split('T')[0]);
+  };
+
+  const saveEdit = async () => {
+    if (!editingItem || !editName.trim()) return;
+    setSavingEdit(true);
+
+    const { error } = await supabase
+      .from('pantry_items')
+      .update({
+        name: editName.trim(),
+        category: editCategory,
+        quantity: editQty,
+        expiry_date: editExpiryISO,
+      })
+      .eq('id', editingItem.id);
+
+    setSavingEdit(false);
+
+    if (error) {
+      Alert.alert('Could not save', error.message);
+      return;
+    }
+
+    setEditingItem(null);
+    loadStats();
+  };
+
+  const deleteEdit = () => {
+    if (!editingItem) return;
+    const doDelete = async () => {
+      const { error } = await supabase.from('pantry_items').delete().eq('id', editingItem.id);
+      if (error) {
+        Alert.alert('Could not delete', error.message);
+        return;
+      }
+      setEditingItem(null);
+      loadStats();
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Delete "${editingItem.name}"? This won't count as used or wasted.`)) doDelete();
+    } else {
+      Alert.alert('Delete item?', `Delete "${editingItem.name}"? This won't count as used or wasted.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: doDelete },
+      ]);
+    }
+  };
+
+  const adjustEditDate = (days: number) => {
+    const d = new Date(editExpiryISO + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    setEditExpiryISO(d.toISOString().split('T')[0]);
   };
 
   return (
@@ -242,19 +336,20 @@ export default function DashboardScreen() {
             </View>
 
             <Text style={styles.sectionTitle}>Your pantry</Text>
+            <Text style={styles.hint}>Tap an item to edit or delete it</Text>
             {pantryItems.length === 0 ? (
               <Text style={styles.emptyText}>No items yet — tap "Add item" to get started.</Text>
             ) : (
               pantryItems.map((item) => (
                 <View key={item.id} style={styles.pantryRow}>
-                  <View style={{ flex: 1 }}>
+                  <TouchableOpacity style={{ flex: 1 }} onPress={() => openEdit(item)}>
                     <Text style={styles.pantryName}>{item.name}</Text>
                     <Text style={styles.pantryExpiry}>
                       {item.expiry_date ? `Expires ${item.expiry_date}` : ''}
                       {item.expiry_date && item.added_by ? ' · ' : ''}
                       {item.added_by ? `Added by ${item.added_by}` : ''}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.markBtn} onPress={() => markItem(item, 'used')}>
                     <Text style={{ fontSize: 15 }}>✅</Text>
                   </TouchableOpacity>
@@ -266,12 +361,83 @@ export default function DashboardScreen() {
             )}
 
             <View style={styles.nudge}>
-              <Text style={styles.nudgeAmt}>$32 saved</Text>
-              <Text style={styles.nudgeLab}>this month by using items before they expired 🎉</Text>
+              <Text style={styles.nudgeAmt}>${savedThisMonth.toFixed(2)} saved</Text>
+              <Text style={styles.nudgeLab}>
+                {usedThisMonthCount > 0
+                  ? `this month from ${usedThisMonthCount} item${usedThisMonthCount === 1 ? '' : 's'} used before they expired 🎉`
+                  : 'Mark items ✅ used before they expire to start tracking savings'}
+              </Text>
             </View>
           </>
         )}
       </ScrollView>
+
+      <Modal visible={!!editingItem} animationType="slide" transparent>
+        <View style={styles.editOverlay}>
+          <View style={styles.editSheet}>
+            <Text style={styles.editTitle}>Edit item</Text>
+
+            <Text style={styles.fieldLabel}>Item name</Text>
+            <TextInput style={styles.input} value={editName} onChangeText={setEditName} />
+
+            <Text style={styles.fieldLabel}>Category</Text>
+            <View style={styles.chipRow}>
+              {CATEGORIES.map((cat) => {
+                const selected = cat === editCategory;
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.chip, selected && styles.chipSelected]}
+                    onPress={() => setEditCategory(cat)}
+                  >
+                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                      {categoryDefaults[cat].emoji} {cat}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.fieldLabel}>Quantity</Text>
+            <View style={styles.stepperRow}>
+              <TouchableOpacity style={styles.stepperBtn} onPress={() => setEditQty((q) => Math.max(1, q - 1))}>
+                <Text style={styles.stepperBtnText}>–</Text>
+              </TouchableOpacity>
+              <Text style={styles.stepperVal}>{editQty}</Text>
+              <TouchableOpacity style={styles.stepperBtn} onPress={() => setEditQty((q) => q + 1)}>
+                <Text style={styles.stepperBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.fieldLabel}>Expiry date</Text>
+            <View style={styles.stepperRow}>
+              <TouchableOpacity style={styles.stepperBtn} onPress={() => adjustEditDate(-1)}>
+                <Text style={styles.stepperBtnText}>–</Text>
+              </TouchableOpacity>
+              <Text style={[styles.stepperVal, { width: 110 }]}>{editExpiryISO}</Text>
+              <TouchableOpacity style={styles.stepperBtn} onPress={() => adjustEditDate(1)}>
+                <Text style={styles.stepperBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.editBtnRow}>
+              <TouchableOpacity style={styles.deleteBtn} onPress={deleteEdit}>
+                <Text style={styles.deleteBtnText}>Delete</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditingItem(null)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveEditBtn, savingEdit && { opacity: 0.6 }]}
+                onPress={saveEdit}
+                disabled={savingEdit}
+              >
+                <Text style={styles.saveEditBtnText}>{savingEdit ? '…' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -297,7 +463,8 @@ const styles = StyleSheet.create({
   statCard: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 12, borderWidth: 1, borderColor: colors.line },
   statN: { fontSize: 19, fontWeight: '700', color: colors.ink },
   statL: { fontSize: 10.5, color: colors.inkSoft, marginTop: 2, fontWeight: '600' },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.ink, marginTop: 22, marginBottom: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.ink, marginTop: 22, marginBottom: 2 },
+  hint: { fontSize: 10.5, color: colors.inkSoft, marginBottom: 8 },
   quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   quickCard: { width: '47.5%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.line, gap: 8 },
   quickTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink },
@@ -309,4 +476,24 @@ const styles = StyleSheet.create({
   nudge: { marginTop: 18, backgroundColor: colors.primary, borderRadius: radius.xl, padding: 16 },
   nudgeAmt: { fontSize: 23, fontWeight: '700', color: colors.white },
   nudgeLab: { fontSize: 11.5, color: colors.white, opacity: 0.9, marginTop: 2 },
+  editOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  editSheet: { backgroundColor: colors.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 30 },
+  editTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, marginBottom: 6 },
+  fieldLabel: { fontSize: 11.5, fontWeight: '700', color: colors.inkSoft, marginTop: 14, marginBottom: 6, textTransform: 'uppercase' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  chipSelected: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: colors.ink },
+  chipTextSelected: { color: colors.primaryDark },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stepperBtn: { width: 36, height: 36, borderRadius: 11, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  stepperBtnText: { fontSize: 16, fontWeight: '700', color: colors.primaryDark },
+  stepperVal: { fontSize: 14, fontWeight: '700', color: colors.ink, width: 24, textAlign: 'center' },
+  editBtnRow: { flexDirection: 'row', gap: 8, marginTop: 24 },
+  deleteBtn: { flex: 1, backgroundColor: colors.redSoft, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  deleteBtnText: { color: colors.red, fontWeight: '700', fontSize: 13 },
+  cancelBtn: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  cancelBtnText: { color: colors.inkSoft, fontWeight: '700', fontSize: 13 },
+  saveEditBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  saveEditBtnText: { color: colors.white, fontWeight: '700', fontSize: 13 },
 });
