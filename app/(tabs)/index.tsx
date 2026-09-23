@@ -1,6 +1,6 @@
-import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router/react-navigation';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { getMyHouseholdId, getMyHouseholdInfo, HouseholdInfo, joinHouseholdByInviteCode } from '../../lib/household';
 import { supabase } from '../../lib/supabase';

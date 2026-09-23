@@ -1,6 +1,6 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import type { Session } from '@supabase/supabase-js';
 import { Redirect, Stack } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';

@@ -1,5 +1,5 @@
-import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router/react-navigation';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { getMyHouseholdId } from '../../lib/household';
 import { supabase } from '../../lib/supabase';

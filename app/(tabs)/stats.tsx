@@ -1,5 +1,5 @@
-import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router/react-navigation';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { colors, radius } from '../../theme';
