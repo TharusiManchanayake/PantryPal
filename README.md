@@ -1,4 +1,4 @@
-# 🥫 PantryPal
+# 🥗 PantryPal
 
 **Never waste food again.** PantryPal is a mobile app that helps households track what's in their pantry, get AI-generated recipe ideas from what they already have, share a family shopping list, and cut down on food waste — with real data behind every screen, not just mockups.
 
