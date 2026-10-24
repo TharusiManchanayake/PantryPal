@@ -11,7 +11,7 @@ Built as a solo project to learn full-stack mobile development: React Native on 
 - **📷 Barcode scanning** — point the camera at any product barcode; PantryPal looks it up via Open Food Facts and auto-fills the item name and brand. Falls back to quick manual entry (category picker, quantity stepper, smart expiry-date defaults) when a product isn't found.
 - **🍳 AI recipe suggestions** — pulls your actual pantry contents and asks an AI model (via Groq) for recipes that use what you already have, flagging exactly what's missing for each one.
 - **🛒 Shared shopping list** — a live, checkable list the whole household can add to, with notes per item ("get the low-fat one") and who added what.
-- **📊 Waste insights** *(in progress)* — tracks which items get used vs. wasted over time, surfacing patterns by category and estimated savings.
+- **📊 Waste insights**  — tracks which items get used vs. wasted over time, surfacing patterns by category and estimated savings.
 - **🏠 Dashboard** — at-a-glance view of what's expiring soon, total items on hand, and quick access to every other screen.
 
 ## 🛠️ Tech Stack
