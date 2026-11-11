@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { getMyHouseholdId, getMyHouseholdInfo, HouseholdInfo, joinHouseholdByInviteCode } from '../../lib/household';
 import { supabase } from '../../lib/supabase';
@@ -59,6 +59,8 @@ export default function DashboardScreen() {
   // In-app confirmation dialogs (replace the browser's plain confirm box)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
+  const showNotice = (title: string, message: string) => setNotice({ title, message });
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -152,14 +154,14 @@ export default function DashboardScreen() {
     });
 
     if (logError) {
-      Alert.alert('Could not log', logError.message);
+      showNotice('Could not log', logError.message);
       return;
     }
 
     const { error: deleteError } = await supabase.from('pantry_items').delete().eq('id', item.id);
 
     if (deleteError) {
-      Alert.alert('Could not remove item', deleteError.message);
+      showNotice('Could not remove item', deleteError.message);
       return;
     }
 
@@ -182,13 +184,13 @@ export default function DashboardScreen() {
     setJoining(false);
 
     if (error) {
-      Alert.alert('Could not join', error);
+      showNotice('Could not join', error);
       return;
     }
 
     setJoinCode('');
     setShowJoinBox(false);
-    Alert.alert('Joined!', "You're now sharing a pantry with this household.");
+    showNotice('Joined!', "You're now sharing a pantry with this household.");
     loadStats();
   };
 
@@ -222,7 +224,7 @@ export default function DashboardScreen() {
     setSavingEdit(false);
 
     if (error) {
-      Alert.alert('Could not save', error.message);
+      showNotice('Could not save', error.message);
       return;
     }
 
@@ -235,7 +237,7 @@ export default function DashboardScreen() {
     const { error } = await supabase.from('pantry_items').delete().eq('id', editingItem.id);
     if (error) {
       setShowDeleteConfirm(false);
-      Alert.alert('Could not delete', error.message);
+      showNotice('Could not delete', error.message);
       return;
     }
     closeEdit();
@@ -442,6 +444,15 @@ export default function DashboardScreen() {
             </View>
           </View>
 
+          <ConfirmDialog
+            inline
+            visible={!!notice && !!editingItem}
+            title={notice?.title ?? ''}
+            message={notice?.message ?? ''}
+            hideCancel
+            onConfirm={() => setNotice(null)}
+            onCancel={() => setNotice(null)}
+          />
           {/* Rendered inline inside the edit Modal — stacking two real Modals is unreliable on iPhones */}
           <ConfirmDialog
             inline
@@ -456,6 +467,15 @@ export default function DashboardScreen() {
           />
         </View>
       </Modal>
+
+      <ConfirmDialog
+        visible={!!notice && !editingItem}
+        title={notice?.title ?? ''}
+        message={notice?.message ?? ''}
+        hideCancel
+        onConfirm={() => setNotice(null)}
+        onCancel={() => setNotice(null)}
+      />
 
       <ConfirmDialog
         visible={showLogoutConfirm}

@@ -9,6 +9,7 @@ type Props = {
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean; // red confirm button, for things like delete
+  hideCancel?: boolean; // single-button notice
   inline?: boolean; // render as an overlay inside a parent instead of its own Modal
   onConfirm: () => void;
   onCancel: () => void;
@@ -22,6 +23,7 @@ export default function ConfirmDialog({
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
   destructive = false,
+  hideCancel = false,
   inline = false,
   onConfirm,
   onCancel,
@@ -35,9 +37,11 @@ export default function ConfirmDialog({
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.message}>{message}</Text>
         <View style={styles.row}>
-          <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
-            <Text style={styles.cancelText}>{cancelLabel}</Text>
-          </TouchableOpacity>
+          {!hideCancel && (
+            <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
+              <Text style={styles.cancelText}>{cancelLabel}</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.confirmBtn, destructive && styles.confirmBtnDestructive]}
             onPress={onConfirm}
