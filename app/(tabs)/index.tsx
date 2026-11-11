@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router/react-navigation';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import { getMyHouseholdId, getMyHouseholdInfo, HouseholdInfo, joinHouseholdByInviteCode } from '../../lib/household';
 import { supabase } from '../../lib/supabase';
 import { categoryDefaults, colors, radius } from '../../theme';
@@ -21,6 +22,15 @@ type PantryItem = {
   quantity: number;
 };
 
+// Builds YYYY-MM-DD from LOCAL date parts. toISOString() converts to UTC first,
+// which shifts dates by a day in timezones ahead of UTC (like Sri Lanka).
+function toLocalISODate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export default function DashboardScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -34,6 +44,7 @@ export default function DashboardScreen() {
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [myName, setMyName] = useState('');
+  const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [savedThisMonth, setSavedThisMonth] = useState(0);
   const [usedThisMonthCount, setUsedThisMonthCount] = useState(0);
 
@@ -44,6 +55,10 @@ export default function DashboardScreen() {
   const [editQty, setEditQty] = useState(1);
   const [editExpiryISO, setEditExpiryISO] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // In-app confirmation dialogs (replace the browser's plain confirm box)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -56,6 +71,10 @@ export default function DashboardScreen() {
 
     const info = await getMyHouseholdInfo();
     setHouseholdInfo(info);
+
+    // Names of the other people sharing this pantry
+    const { data: names } = await supabase.rpc('household_member_names');
+    setSharedWith(Array.isArray(names) ? (names as string[]) : []);
 
     if (!hhId) {
       setTotalItems(0);
@@ -79,7 +98,7 @@ export default function DashboardScreen() {
       .from('pantry_items')
       .select('*', { count: 'exact', head: true })
       .eq('household_id', hhId)
-      .lte('expiry_date', fourDaysFromNow.toISOString().split('T')[0]);
+      .lte('expiry_date', toLocalISODate(fourDaysFromNow));
 
     const { count: shopping } = await supabase
       .from('shopping_list')
@@ -147,23 +166,9 @@ export default function DashboardScreen() {
     loadStats();
   };
 
-  const handleSignOut = () => {
-    if (Platform.OS === 'web') {
-      if (window.confirm('Log out? You can log back in anytime.')) {
-        supabase.auth.signOut();
-      }
-    } else {
-      Alert.alert('Log out?', 'You can log back in anytime.', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log out',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase.auth.signOut();
-          },
-        },
-      ]);
-    }
+  const confirmSignOut = async () => {
+    setShowLogoutConfirm(false);
+    await supabase.auth.signOut();
   };
 
   const handleJoin = async () => {
@@ -192,7 +197,12 @@ export default function DashboardScreen() {
     setEditName(item.name);
     setEditCategory(item.category);
     setEditQty(item.quantity || 1);
-    setEditExpiryISO(item.expiry_date || new Date().toISOString().split('T')[0]);
+    setEditExpiryISO(item.expiry_date || toLocalISODate(new Date()));
+  };
+
+  const closeEdit = () => {
+    setShowDeleteConfirm(false);
+    setEditingItem(null);
   };
 
   const saveEdit = async () => {
@@ -216,36 +226,26 @@ export default function DashboardScreen() {
       return;
     }
 
-    setEditingItem(null);
+    closeEdit();
     loadStats();
   };
 
-  const deleteEdit = () => {
+  const confirmDelete = async () => {
     if (!editingItem) return;
-    const doDelete = async () => {
-      const { error } = await supabase.from('pantry_items').delete().eq('id', editingItem.id);
-      if (error) {
-        Alert.alert('Could not delete', error.message);
-        return;
-      }
-      setEditingItem(null);
-      loadStats();
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Delete "${editingItem.name}"? This won't count as used or wasted.`)) doDelete();
-    } else {
-      Alert.alert('Delete item?', `Delete "${editingItem.name}"? This won't count as used or wasted.`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doDelete },
-      ]);
+    const { error } = await supabase.from('pantry_items').delete().eq('id', editingItem.id);
+    if (error) {
+      setShowDeleteConfirm(false);
+      Alert.alert('Could not delete', error.message);
+      return;
     }
+    closeEdit();
+    loadStats();
   };
 
   const adjustEditDate = (days: number) => {
     const d = new Date(editExpiryISO + 'T00:00:00');
     d.setDate(d.getDate() + days);
-    setEditExpiryISO(d.toISOString().split('T')[0]);
+    setEditExpiryISO(toLocalISODate(d));
   };
 
   return (
@@ -258,7 +258,7 @@ export default function DashboardScreen() {
             <Text style={styles.subtitle}>Logged in as {myName || 'you'}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.avatar} onPress={handleSignOut}>
+        <TouchableOpacity style={styles.avatar} onPress={() => setShowLogoutConfirm(true)}>
           <Text>🙂</Text>
         </TouchableOpacity>
       </View>
@@ -270,10 +270,15 @@ export default function DashboardScreen() {
           <>
             {householdInfo && (
               <View style={styles.householdCard}>
-                <Text style={styles.householdName}>🏠 {householdInfo.name}</Text>
+                <Text style={styles.householdName}>🏠 {myName ? `${myName}'s code` : 'Your code'}</Text>
                 <Text style={styles.householdSub}>
-                  Invite code: <Text style={styles.inviteCode}>{householdInfo.inviteCode}</Text> — share this with family to let them join your pantry
+                  Invite code: <Text style={styles.inviteCode}>{householdInfo.inviteCode}</Text> — this is your own code and never changes
                 </Text>
+                {sharedWith.length > 0 && (
+                  <Text style={styles.householdSub}>
+                    Sharing a pantry with: <Text style={styles.inviteCode}>{sharedWith.join(', ')}</Text>
+                  </Text>
+                )}
                 <TouchableOpacity onPress={() => setShowJoinBox(!showJoinBox)}>
                   <Text style={styles.joinLink}>
                     {showJoinBox ? 'Cancel' : 'Have a code from someone else? Join their household →'}
@@ -372,7 +377,7 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={!!editingItem} animationType="slide" transparent>
+      <Modal visible={!!editingItem} animationType="slide" transparent onRequestClose={closeEdit}>
         <View style={styles.editOverlay}>
           <View style={styles.editSheet}>
             <Text style={styles.editTitle}>Edit item</Text>
@@ -421,10 +426,10 @@ export default function DashboardScreen() {
             </View>
 
             <View style={styles.editBtnRow}>
-              <TouchableOpacity style={styles.deleteBtn} onPress={deleteEdit}>
+              <TouchableOpacity style={styles.deleteBtn} onPress={() => setShowDeleteConfirm(true)}>
                 <Text style={styles.deleteBtnText}>Delete</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditingItem(null)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={closeEdit}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -436,8 +441,31 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Rendered inline inside the edit Modal — stacking two real Modals is unreliable on iPhones */}
+          <ConfirmDialog
+            inline
+            visible={showDeleteConfirm}
+            emoji="🗑️"
+            title="Delete this item?"
+            message={`"${editingItem?.name ?? ''}" will be removed. This won't count as used or wasted.`}
+            confirmLabel="Delete"
+            destructive
+            onConfirm={confirmDelete}
+            onCancel={() => setShowDeleteConfirm(false)}
+          />
         </View>
       </Modal>
+
+      <ConfirmDialog
+        visible={showLogoutConfirm}
+        emoji="👋"
+        title="Log out?"
+        message="You can log back in anytime."
+        confirmLabel="Log out"
+        onConfirm={confirmSignOut}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
     </View>
   );
 }
